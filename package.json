@@ -11,7 +11,9 @@
     "demo2:build": "parcel build examples-src/demo2/index.html --dist-dir examples/demo2",
     "build": "tsc"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "publishConfig": {
     "registry": "https://registry.npmjs.org",
     "access": "public"
@@ -23,6 +25,7 @@
   "author": "Necolo Lv.C",
   "license": "MIT",
   "dependencies": {
+    "d3-drag": "^3.0.0",
     "d3-hierarchy": "^2.0.0",
     "d3-scale": "^3.0.0",
     "d3-selection": "^2.0.0",
