@@ -1,4 +1,4 @@
-import { hierarchy, tree as createTree, HierarchyNode } from 'd3-hierarchy';
+import { hierarchy, tree as createTree, HierarchyNode, HierarchyPointNode } from 'd3-hierarchy';
 import { select, Selection } from 'd3-selection';
 import { scaleOrdinal } from 'd3-scale';
 import { zoom, zoomTransform } from 'd3-zoom';
@@ -22,14 +22,23 @@ interface Axis {
   y: number;
 }
 
+interface DragState {
+  nodeStart: Axis;
+  pointerStart: Axis;
+  pointerNodeOffset?: Axis; // offset between pointer and node center
+  nearestNode?: MNode;
+  transform: Axis & { k: number };
+}
+
+
 type MNode = HierarchyNode<MindMapData> & {
   x0: number;
   y0: number;
   x: number;
   y: number;
-  dragOffsetX: number | undefined;
-  dragOffsetY: number | undefined;
-};
+  dragState?: DragState | null;
+  _children?: MNode[]; // collapsed children
+}
 
 function diagonal(s: Axis, d: Axis) {
   return `M ${s.y} ${s.x}
@@ -38,15 +47,105 @@ function diagonal(s: Axis, d: Axis) {
       ${d.y} ${d.x}`;
 }
 
+//given an MNode, return the corresponding DOM element
+function getNodeElement(node: MNode): Selection<SVGGElement, unknown, HTMLElement, any> {
+  return select(`g.node[data-id="${node.id}"]`);
+}
+
+// Add helper function to find nearest node
+function findNearestNodeByPosition(node: MNode, nodes: MNode[], threshold: number = 100): MNode | null {
+  let nearest: MNode | null = null;
+  let minDistance = threshold;
+
+  let position: Axis = { x: node.x, y: node.y };
+
+  // get x and y of mouse, not node for better dragging
+  // if (node.dragState?.pointerNodeOffset) {
+  //   position = {
+  //     x: node.dragState.pointerStart.x + (node.dragState.pointerNodeOffset.x * node.dragState.transform.k),
+  //     y: node.dragState.pointerStart.y + (node.dragState.pointerNodeOffset.y * node.dragState.transform.k),
+  //   }
+  // };
+
+  nodes.filter(d => d.id !== node.id).forEach(d => {
+
+    const distance = Math.sqrt(
+      Math.pow(position.x - d.x, 2) + 
+      Math.pow(position.y - d.y, 2)
+    );
+    
+    if (distance < minDistance) {
+      minDistance = distance;
+      nearest = d;
+    }
+  });
+
+  return nearest;
+}
+
+// Add helper function to check if a node is a descendant of another
+function isDescendantOf(node: MNode, target: MNode): boolean {
+
+  if (node.id === target.id) {
+    return true;
+  }
+
+  if (node.parent) {
+    return isDescendantOf(node.parent, target);
+  }
+
+  return false;
+}
+
+
+function addBoundingBox(
+    selection: Selection<SVGGElement, any, any, any>, 
+    options: {
+      padding?: number,
+      className?: string,
+      color?: string,
+      strokeWidth?: string,
+    }
+  ): void {
+
+  const padding = options.padding || 3;
+  const className = options.className || 'highlight-box';
+  const color = options.color || '#1f77b4';
+  const strokeWidth = options.strokeWidth || '2px';
+
+  selection.selectAll(`rect.${className}`).remove();
+  
+  const bbox = selection.node().getBBox();
+  
+  let rect = selection.append('rect')
+
+  rect = rect
+    .attr('class', className)
+    .attr('x', bbox.x - padding)
+    .attr('y', bbox.y - padding)
+    .attr('width', bbox.width + padding * 2)
+    .attr('height', bbox.height + padding * 2)
+    .style('fill', 'none')
+    .style('stroke', color)
+    .style('stroke-width', strokeWidth)
+    // .style('opacity', 0.0);
+
+    // rect.transition().duration(100).style('opacity', 0.8);
+
+}
 
 
 
-export default function getRender(container: HTMLElement, options: Options = {}) {
+export default function MindMap(
+  container: HTMLElement, 
+  options: Options = {},
+) {
 
   // init options
   const colorSet = options.colorSet || ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'];
   const density = options.density || 1;
   const nodeMarkerRadius = options.nodeMarkerRadius || 5;
+
 
   // init the svg and tree
   const svg = select(container).append('svg')
@@ -67,102 +166,210 @@ export default function getRender(container: HTMLElement, options: Options = {})
   }));
 
 
-
+  // Animation of circle grow/shrink on hover
   function animateNodeMarkerSizeChange(nodeMarker: Selection<SVGCircleElement, unknown, HTMLElement | null , any>, targetRadius: number = nodeMarkerRadius) {
     nodeMarker.transition().duration(150)
       .attr('r', targetRadius);
   }
 
+
+  /* 
+    EVENT HANDLERS
+  */
+
+  /* DRAG HANDLERS
+  
+    nodeDragStart: 
+     1.calculates offset between click and node center
+     2. creates a clone of the node, which is what is dragged on the map
+     3. raises the cloned node to the top of the stack
+    4. returns the original node to non-hovered size
+
+    nodeDrag:
+     1. calculates the movement in SVG coordinates using zoom transform. This account for pan (x,y) and zoom (k)
+     2. Applies the movement to the starting position.
+     3. Finds the nearest node if within threshold, updates highlight box and sets the nearest node in drag state.
+
+    nodeDragEnd:
+      1. Removes the cloned node and highlight box
+      2. Deletes the drag state
+      3. Updates the the the mind map if needed
+  */
+
+
   function nodeDragStart(event: any, d: MNode) {
-    if (!event.active) {
-      d.x0 = d.x;
-      d.y0 = d.y;
-    }
-  
-    // Store the initial pointer position relative to the node
     const transform = zoomTransform(svg.node());
-    const pointer = transform.invert([event.x, event.y]);
-    d.dragOffsetX = d.y - pointer[0];
-    d.dragOffsetY = d.x - pointer[1];
+    const pointerSvgCoords = transform.invert([event.x, event.y]);
+
+
+    
+    // Store initial state
+    d.dragState = {
+      transform: { x: transform.x, y: transform.y, k: transform.k },
+      nodeStart: { x: d.x, y: d.y },
+      pointerStart: { x: pointerSvgCoords[0], y: pointerSvgCoords[1] },
+      pointerNodeOffset: { x: pointerSvgCoords[0] - d.x, y: pointerSvgCoords[1] - d.y },
+    };
   
-    // Create clone of dragged node
+    // Create clone
     const originalNode = select(this);
     const clonedNode = originalNode.clone(true);
     clonedNode.classed('dragging', true);
     
-    // Append clone to SVG group and raise it
     const foundNode = svgGroup.node();
     if (foundNode) foundNode.appendChild(clonedNode.node());
     clonedNode.raise();
   
-    // Reset original node marker size
+    // Return original node to non-hovered size. 
     animateNodeMarkerSizeChange(originalNode.select('circle'));
+
   }
   
-  function nodeDrag(event: any, d: MNode) {
-    // Get current zoom transform
+  function nodeDrag(event: any, draggingNode: MNode) {
     const transform = zoomTransform(svg.node());
-    
-    // Convert screen coordinates to SVG coordinates
-    const pointer = transform.invert([event.x, event.y]);
-    
-    // Update node position using stored offset
-    d.x = pointer[1] + d.dragOffsetY;
-    d.y = pointer[0] + d.dragOffsetX;
-  
-    // Update dragged node position
-    select('g.node.dragging')
-      .attr('transform', `translate(${d.y}, ${d.x})`);
-  
-    // Collision detection
-    const nodes = svgGroup.selectAll('.node').filter(node => node !== d);
-    let closestNode = null;
-    let minDistance = 30;
-  
-    nodes.each(function(otherNode: MNode) {
-      const distance = Math.hypot(otherNode.x - d.x, otherNode.y - d.y);
-      if (distance < minDistance) {
-        minDistance = distance;
-        closestNode = otherNode;
-      }
-    });
-  
-    // Highlight nearest node
-    nodes.select('rect.highlight-box').remove();
-    
-    if (closestNode) {
-      select(svgGroup.selectAll('.node').filter(node => node === closestNode).node())
-        .append('rect')
-        .attr('class', 'highlight-box')
-        .attr('x', -10)
-        .attr('y', -10)
-        .attr('width', 20)
-        .attr('height', 20)
-        .style('fill', 'none')
-        .style('stroke', 'red')
-        .style('stroke-width', '2px');
-    }
-  }
+    const pointerSvgCoords = transform.invert([event.x, event.y]);
 
-  function nodeDragEnd(event: any, d: HierarchyNode<MindMapData>) {
-
-    // delete dragging copy
-    select('g.node.dragging').remove();
-
-    //delete collision artifact
-    svgGroup.selectAll('.highlight-box').remove();
-
-
-  }
-
-
-  // update function
-  function update(source: MNode) {
-    if (!root) {
+    if (!draggingNode.dragState) { 
+      console.error('No drag state initialized');
       return;
     }
-    const treeData = tree(root);
-    const nodes = treeData.descendants();
+
+    
+    // Calculate movement in SVG coordinates
+    const dx = pointerSvgCoords[0] - draggingNode.dragState.pointerStart.x;
+    const dy = pointerSvgCoords[1] - draggingNode.dragState.pointerStart.y;
+  
+    // Apply movement to starting position, multiplied by zoom level
+    draggingNode.y = draggingNode.dragState.nodeStart.y + dx * transform.k;
+    draggingNode.x = draggingNode.dragState.nodeStart.x + dy * transform.k;
+
+  
+    // Find nearest node if withing threshold
+    const nearestNode = findNearestNodeByPosition(draggingNode, root.descendants());
+
+    // Update highlight box and set the nearest node in drag state.
+    if (nearestNode) {
+      const nearestNodeElement = getNodeElement(nearestNode);
+
+      // we can't drop to our own descendants or parent
+      if (isDescendantOf(nearestNode, draggingNode) || nearestNode.id === draggingNode?.parent?.id) {
+        delete draggingNode.dragState?.nearestNode;
+        addBoundingBox(nearestNodeElement, {className: 'highlight-box', color: 'red'});
+
+      // all good, go ahead an highlight the node for drop
+      } else {
+        addBoundingBox(nearestNodeElement, {className: 'highlight-box'});
+        draggingNode.dragState.nearestNode = nearestNode;
+      }
+    } else {
+      delete draggingNode.dragState?.nearestNode;
+    }
+
+    svgGroup.selectAll('.highlight-box').filter((d: any) => d.id !== nearestNode?.id)
+      .transition().duration(100).style('opacity', 0.0).remove()
+
+  
+    // Finally, move the cloned node to the new position
+    select('g.node.dragging')
+      .attr('transform', `translate(${draggingNode.y}, ${draggingNode.x})`);
+  }
+  
+  function nodeDragEnd(event: any, d: MNode) {
+    select('g.node.dragging').remove();
+    svgGroup.selectAll('.highlight-box').transition().duration(300).style('opacity', 0.0).remove().remove();
+    const nearestNode = d.dragState?.nearestNode;
+
+    if (nearestNode) {
+      // swap positions
+      console.group('Drop Event');
+      console.log("Swapping positions of nodes");
+      console.log("Node 1: ", d);
+      if (d.parent) {
+        console.log("children of parent: ", d.parent.children);
+        d.parent.children = d.parent.children?.filter(child => child.id !== d.id) || undefined;
+
+        // D3 does not allow empty child arrays.
+        if (d.parent.children?.length === 0) {
+          delete d.parent.children;
+        }
+        console.log("children of parent after removal: ", d.parent.children);
+      }
+      nearestNode.children = [...(nearestNode.children || []), d];
+      console.log("Children of nearest node: ", nearestNode.children);
+      d.parent = nearestNode;
+
+      // The depth of a node is not recalculated after moving it, so we 
+      // manually set to the depth of the nearest node + 1
+      d.depth = nearestNode.depth + 1;
+
+      if (d.children) {
+        // If the node has children, we need to update their depth as well, recursively down the tree
+        const updateChildrenDepth = (node: MNode, depth: number) => {
+          node.depth = depth;
+          if (node.children) {
+            node.children.forEach(child => updateChildrenDepth(child, depth + 1));
+          }
+        }
+        d.children.forEach(child => updateChildrenDepth(child, d.depth + 1));
+      }
+
+      /* 
+      Update the mind map from the root.
+      Note that future programmers shouldn't optimize by updating from the node,
+      the magic of d3 enter/update/exit update selection is that it handles this
+      complexity for us with key bindings.
+      */
+      update(root); 
+
+      console.groupEnd();
+    } 
+
+    delete d.dragState;  // Clean up stored state
+  }
+
+  
+  /* 
+    NODE MOUSE EVENTS
+  */
+
+  function nodeClicked(event: MouseEvent, d: MNode) {
+    if (d.children) {
+      d._children = d.children;
+      delete d.children;
+    } else {
+      d.children = d._children;
+      delete d._children;
+    }
+    update(d);
+  }
+
+  //mouse over function
+  function mouseOver(event: MouseEvent, d: HierarchyPointNode<MindMapData> | MNode) {
+    const t = select(this);
+    t.style('cursor', 'pointer');
+    t.select('circle')
+      .transition().duration(150)
+      .attr('r', 9);
+  }
+
+  function mouseOut(event: MouseEvent, d: HierarchyPointNode<MindMapData> | MNode) {
+    const t = select(this)
+    t.style('cursor', 'default');
+    t.select('circle')
+      .transition().duration(150)
+      .attr('r', 5);
+  }
+  
+  // update function
+  function update(source: MNode) {
+    if (!source) {
+      return;
+    }
+    const treeData = tree(source);
+
+    //duplicate the x y values for cloning and dragging. This makes all nodes of type MNode
+    const nodes = treeData.descendants()
+
     const links = treeData.links();
 
     nodes.forEach(d => {
@@ -176,24 +383,15 @@ export default function getRender(container: HTMLElement, options: Options = {})
     const nodeEnter = node.enter()
       .append('g')
       .attr('class', 'node')
+      .attr('data-id', d => d.id)
       .attr('transform', d => `translate(${source.y0}, ${source.x0})`)
-      .on('mouseover', function () {
-        select(this)
-          .style('cursor', 'pointer');
-        select(this).select('circle')
-          .transition().duration(150)
-          .attr('r', 9);
-      })
-      .on('mouseout', function () {
-        select(this).style('cursor', 'default');
-        select(this).select('circle')
-          .transition().duration(150)
-          .attr('r', 5);
-      })
+      .on('mouseover', mouseOver)
+      .on('mouseout', mouseOut)
       .call(drag<MNode, unknown>()
         .on('start', nodeDragStart)
         .on('drag', nodeDrag)
-        .on('end', (e, d) => nodeDragEnd(e, d)))
+        .on('end', nodeDragEnd))
+
 
     nodeEnter.append('circle')
       .attr('r', 5)
@@ -272,19 +470,9 @@ export default function getRender(container: HTMLElement, options: Options = {})
       d.y0 = d.y;
     });
 
-    function nodeClicked(event, d) {
-      if (d.children) {
-        d._children = d.children;
-        d.children = null;
-      } else {
-        d.children = d._children;
-        d._children = null;
-      }
-      update(d);
-    }
   }
 
-  return function (data: MindMapData) {
+  function renderFromData(data: MindMapData) {
     root = hierarchy(data) as MNode;
     root.x0 = height / 2;
     root.y0 = 0;
@@ -295,4 +483,6 @@ export default function getRender(container: HTMLElement, options: Options = {})
       svgGroup,
     };
   }
+
+  return renderFromData;
 }

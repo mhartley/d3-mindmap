@@ -8,7 +8,7 @@
     "lib": ["esnext", "dom"],
     "moduleResolution": "node",
     "downlevelIteration": true,
-    "allowSyntheticDefaultImports" : true,
+    "allowSyntheticDefaultImports": true,
     "allowJs": true,
     "declaration": true,
     "emitDecoratorMetadata": true,
@@ -28,10 +28,6 @@
     "baseUrl": "./",
     "outDir": "dist"
   },
-  "include": [
-    "./src"
-  ],
-  "exclude": [
-    "./__tests__"
-  ]
+  "include": ["./src"],
+  "exclude": ["./__tests__"]
 }
