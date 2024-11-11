@@ -32,6 +32,6 @@ function onJsonUpdate = (mindMapData) => void
 MindMap(document.body, onJsonUpdate)(data);
 ```
 
-Checkout a live demo of d3-mindmap [here](https://necolo.github.io/d3-mindmap/examples/demo2/)
+Checkout a live demo of d3-mindmap [here](https://mhartley.github.io/d3-mindmap-interactive)
 
 
