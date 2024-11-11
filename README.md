@@ -2,19 +2,15 @@
 
 A JavaScript library for generating mind maps using D3.js.
 
-## Installation
-
-To install d3-mindmap, use the following command:
-
-```
-npm i d3-mindmap
-```
 
 ## Usage
 
 ```javascript
-import getRender from "d3-mindmap";
 
+import MindMap from package_location
+
+
+// data format for mindmap generation
 const data = {
   name: "Root",
   children: [
@@ -29,11 +25,13 @@ const data = {
   ],
 };
 
-getRender(document.body)(data);
+//callback for when user interacts with the mindmap to update the data structure
+function onJsonUpdate = (mindMapData) => void
+
+// render the function
+MindMap(document.body, onJsonUpdate)(data);
 ```
 
 Checkout a live demo of d3-mindmap [here](https://necolo.github.io/d3-mindmap/examples/demo2/)
 
-## License
 
-d3-mindmap is licensed under the MIT License.

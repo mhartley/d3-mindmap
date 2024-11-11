@@ -5,8 +5,6 @@
   
   "typings": "dist/index.d.ts",
   "scripts": {
-    "demo1": "parcel examples-src/demo1/index.html",
-    "demo1:build": "parcel build examples-src/demo1/index.html --dist-dir examples/demo1",
     "demo2": "parcel examples-src/demo2/index.html",
     "demo2:build": "parcel build examples-src/demo2/index.html --dist-dir examples/demo2",
     "lint": "eslint --fix src examples-src",
