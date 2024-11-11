@@ -6,7 +6,7 @@
   "typings": "dist/index.d.ts",
   "scripts": {
     "demo2": "parcel examples-src/demo2/index.html",
-    "demo2:build": "parcel build examples-src/demo2/index.html --dist-dir examples/demo2",
+    "demo2:build": "npx parcel build examples-src/demo2/index.html --dist-dir examples/demo2",
     "lint": "eslint --fix src examples-src",
     "build": "tsc"
   },
