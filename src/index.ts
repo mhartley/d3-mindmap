@@ -8,6 +8,7 @@ import { Circle } from '@react-google-maps/api';
 
 interface MindMapData {
   name: string;
+  content?: string;
   children?: MindMapData[];
 }
 
@@ -39,6 +40,16 @@ type MNode = HierarchyNode<MindMapData> & {
   dragState?: DragState | null;
   _children?: MNode[]; // collapsed children
 }
+
+
+function buildJsonFromTree(node: MNode): MindMapData {
+  const jsonNode: MindMapData = {
+    ...node.data,
+    children: node.children ? node.children.map(child => buildJsonFromTree(child)) : undefined,
+  };
+  return jsonNode;
+}
+
 
 function diagonal(s: Axis, d: Axis) {
   return `M ${s.y} ${s.x}
@@ -98,6 +109,9 @@ function isDescendantOf(node: MNode, target: MNode): boolean {
 }
 
 
+
+
+
 function addBoundingBox(
     selection: Selection<SVGGElement, any, any, any>, 
     options: {
@@ -138,6 +152,7 @@ function addBoundingBox(
 
 export default function MindMap(
   container: HTMLElement, 
+  onDataUpdate: (data: MindMapData) => void,
   options: Options = {},
 ) {
 
@@ -321,6 +336,11 @@ export default function MindMap(
       */
       update(root); 
 
+      /* 
+      Notify the parent component of the data change.
+      */
+      onDataUpdate(buildJsonFromTree(root));
+
       console.groupEnd();
     } 
 
@@ -472,7 +492,9 @@ export default function MindMap(
 
   }
 
-  function renderFromData(data: MindMapData) {
+  function renderFromData(
+    data: MindMapData
+  ) {
     root = hierarchy(data) as MNode;
     root.x0 = height / 2;
     root.y0 = 0;

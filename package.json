@@ -2,7 +2,7 @@
   "name": "d3-mindmap",
   "version": "1.0.0",
   "description": "A D3.js plugin for creating mindmaps that supports drag and drop and two way interaction with JSON data.",
-  "main": "dist/index.js",
+  
   "typings": "dist/index.d.ts",
   "scripts": {
     "demo1": "parcel examples-src/demo1/index.html",
@@ -26,11 +26,12 @@
   "author": "Morgan Hartley",
   "license": "MIT",
   "dependencies": {
-    "d3-hierarchy": "^2.0.0",
-    "d3-scale": "^3.0.0",
-    "d3-selection": "^2.0.0",
+    "d3-hierarchy": "^3.1.0",
+    "d3-scale": "^4.0.2",
+    "d3-selection": "^3.0.0",
     "d3-transition": "^3.0.1",
-    "d3-zoom": "^3.0.0"
+    "d3-zoom": "^3.0.0",
+    "d3-drag": "^3.0.0"
   },
   "devDependencies": {
     "@codemirror/lang-javascript": "^6.1.4",
